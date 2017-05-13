@@ -7,7 +7,11 @@
 #include <limits>
 #include <queue>
 
+
+
 using namespace std;
+
+const int LOCAL_MAX_INT = numeric_limits<int>::max();
 
 
 class Base {
@@ -37,20 +41,35 @@ ostream & operator<<(ostream & os, const Base &b){
 
 class AttackParameters {
 public:
-    int boarder_base;
-    int max_arival_time;
+    int m_destination_base_id;
+    int m_boarder_base;
+    int m_max_arival_time;
 
-    AttackParameters() { boarder_base = -1; max_arival_time = -1; }
-    AttackParameters(int bi, int mat): boarder_base(bi), max_arival_time(mat) {}
+    AttackParameters() { m_destination_base_id = -1; m_boarder_base = -1; m_max_arival_time = -1; }
+    AttackParameters(int dest, int bi, int mat): m_destination_base_id(dest), m_boarder_base(bi), m_max_arival_time(mat) {}
+    AttackParameters(const AttackParameters &ap): m_destination_base_id(ap.m_destination_base_id), 
+                                                  m_boarder_base(ap.m_boarder_base), 
+                                                  m_max_arival_time(ap.m_max_arival_time) { 
+                                                    //cerr << "Calling AttackParameters copy constructor." << endl;
+                                                  }
 };
 
 
 ostream & operator<<(ostream & os, const AttackParameters &ap){
-    os << "AttackParameters - boarder_base: " << ap.boarder_base
-       << " max_arival_time: " << ap.max_arival_time;
+    os << "AttackParameters - m_destination_base_id: " << ap.m_destination_base_id
+       << " boarder_base: " << ap.m_boarder_base
+       << " max_arival_time: " << ap.m_max_arival_time;
 
     return os;
 }
+
+
+class PriorityQueueAttackParametersCompare {
+	public:
+		inline bool operator ()(const AttackParameters &ap1, const AttackParameters &ap2) const {
+			return ap1.m_max_arival_time > ap2.m_max_arival_time;
+		}
+};
 
 
 double distance(Base &b1, Base &b2) {
@@ -71,8 +90,9 @@ double distance(Base &b1, Base &b2) {
 
 
 template<class T> void print_vector(vector<T> &v) {
-    for (int i = 0; i < v.size(); ++i)
+    for (int i = 0; i < v.size(); ++i) {
         cerr << v[i] << endl;
+    }
 }
 
 
@@ -98,7 +118,6 @@ void update_bases(vector<int> &bases, vector<Base> &m_bases, int &m_step) {
         for(int i = 0; i < N; i++) {
 
             int gr = bases[2*i + 1] - m_bases[i].m_size;
-
             m_bases[i].m_owner = bases[2*i];
             m_bases[i].m_size = bases[2*i + 1];
             m_bases[i].m_gr = gr;
@@ -146,10 +165,9 @@ int troop_arival_time(int &origin_base_id,
 
 
 
-void estimate_attack_feasibility_for_base(AttackParameters &ap,
-                                          vector<Base*> &base_neighbourhood,
-                                          vector<vector<int>> &m_arival_time,
-                                          int &max_number_of_attacking_bases) {
+AttackParameters estimate_attack_feasibility_for_base(vector<Base*> &base_neighbourhood,
+                                                      vector<vector<int>> &m_arival_time,
+                                                      int &max_number_of_attacking_bases) {
 
     int N = base_neighbourhood.size();
     int id = base_neighbourhood[0]->m_id;
@@ -157,7 +175,7 @@ void estimate_attack_feasibility_for_base(AttackParameters &ap,
     int number_of_checked_ally_bases = 0;
     int gathered_troops = 0;
     int boarder_base = -1;
-    int max_arival_time = numeric_limits<int>::max();
+    int max_arival_time = LOCAL_MAX_INT;
 
     for(int i = 1; i < N; i++) {
 
@@ -177,7 +195,7 @@ void estimate_attack_feasibility_for_base(AttackParameters &ap,
         // What will be the size of the enemies base at troop arival time?
         int future_base_size = estimate_size_in_t_steps(*base_neighbourhood[0], troop_arival_time);
 
-        cerr << "troop_arival_time: " << troop_arival_time << " gathered_troops: " << gathered_troops << " future_base_size: " << future_base_size << endl;
+        //cerr << "troop_arival_time: " << troop_arival_time << " gathered_troops: " << gathered_troops << " future_base_size: " << future_base_size << " growth rate: " << base_neighbourhood[0]->m_gr << endl;
 
         number_of_checked_ally_bases++;
         // If there are enough troops attack.
@@ -193,33 +211,46 @@ void estimate_attack_feasibility_for_base(AttackParameters &ap,
         }
     }
 
-    ap.boarder_base = boarder_base;
-    ap.max_arival_time = max_arival_time;
-
+    return AttackParameters(id, boarder_base, max_arival_time);
 }
 
 
-void estimate_attack_feasibility(vector<AttackParameters> &attack_parameters_per_base,
-                                 vector<vector<Base*>> &base_neighbourhood,
-                                 vector<vector<int>> &m_arival_time,
-                                 int &max_number_of_attacking_bases) {
+AttackParameters estimate_attack_feasibility(vector<vector<Base*>> &base_neighbourhood,
+                                             vector<vector<int>> &m_arival_time,
+                                             int &max_number_of_attacking_bases) {
 
     int N = base_neighbourhood.size();
 
+    priority_queue<AttackParameters, vector<AttackParameters>, PriorityQueueAttackParametersCompare> pq;
+
     for(int i = 0; i < N; i++) {
-        cerr << "Processing base_neighbourhood i:" << i << endl;
+
+        //cerr << "Processing base_neighbourhood i:" << i << endl;
         // When attacking consider only enemy bases.
-        if (base_neighbourhood[i][0]->m_owner != 0)
+        if (base_neighbourhood[i][0]->m_owner == 0)
             continue;
 
-        estimate_attack_feasibility_for_base(attack_parameters_per_base[i],
-                                             base_neighbourhood[i],
-                                             m_arival_time,
-                                             max_number_of_attacking_bases);
+        AttackParameters ap = estimate_attack_feasibility_for_base(base_neighbourhood[i],
+                                                                   m_arival_time,
+                                                                   max_number_of_attacking_bases);
+
+        if (ap.m_max_arival_time != LOCAL_MAX_INT)
+            pq.push(ap);
 
     }
 
+    //  //cerr << "Priority queue content:" << endl;
+    //while (!pq.empty()) {
+    //    //cerr << pq.top() << endl;
+    //    pq.pop();
 
+    //}
+
+    if (!pq.empty()) {
+        //cerr << "Returning pq top" << endl;
+        return AttackParameters(pq.top());
+    } else
+        return AttackParameters();
 }
 
 
@@ -243,7 +274,7 @@ int AbstractWars::init(vector <int> base_locations, int speed) {
 
     int N = base_locations.size()/2;
 
-    cerr << "Number of base locations: " << N << endl;
+    //cerr << "Number of base locations: " << N << endl;
 
     m_bases.resize(N);
     m_distance_matrix.resize(N);
@@ -299,11 +330,11 @@ int AbstractWars::init(vector <int> base_locations, int speed) {
 
     }
 
-    cerr << "Print bases: " << endl;
-    print_vector(m_bases);
+    //cerr << "Print bases: " << endl;
+    //print_vector(m_bases);
 
-    cerr << "Print distance matrix:" << endl;
-    print_matrix(m_distance_matrix);
+    //cerr << "Print distance matrix:" << endl;
+    //print_matrix(m_distance_matrix);
 
     return 0;
 }
@@ -311,43 +342,68 @@ int AbstractWars::init(vector <int> base_locations, int speed) {
 
 vector<int> AbstractWars::sendTroops(vector <int> bases, vector <int> troops) {
 
-    cerr << "Step: " << m_step << endl;
+    //cerr << "Step: " << m_step << endl;
     update_bases(bases, m_bases, m_step);
-    print_vector(m_bases);
+    //print_vector(m_bases);
 
+    vector<int> res;
+    if (m_step < 1) {
+        m_step++;
+        return res;
+    }
 
     int t_steps = 10;
     int index = 3;
     int fs = estimate_size_in_t_steps(m_bases[index], t_steps);
 
-    cerr << "current: " << m_bases[index].m_size << " fs: " << fs << endl;
+    //cerr << "current: " << m_bases[index].m_size << " fs: " << fs << endl;
 
     int orig = 0;
     int dest = 10;
 
-    cerr << "troop arival time: " << troop_arival_time(orig, dest, m_distance_matrix, m_speed) << endl;
-    cerr << m_arival_time[orig][dest] << endl;
+    //cerr << "troop arival time: " << troop_arival_time(orig, dest, m_distance_matrix, m_speed) << endl;
+    //cerr << m_arival_time[orig][dest] << endl;
         
     index = 4;
     for(int j = 0; j < m_bases.size(); j++) {
 
         int id1 = m_base_neighbourhood[index][j]->m_id;
-        cerr << *m_base_neighbourhood[index][j] << " d: " << m_distance_matrix[index][id1] << endl;
+        //cerr << *m_base_neighbourhood[index][j] << " d: " << m_distance_matrix[index][id1] << endl;
     
     }
 
-    int max_number_of_attacking_bases = 100;
+    int max_number_of_attacking_bases = 5;
 
-    estimate_attack_feasibility(m_attack_parameters_per_base,
-                                m_base_neighbourhood,
-                                m_arival_time,
-                                max_number_of_attacking_bases);
-
-    print_vector(m_attack_parameters_per_base);
-
-    vector<int> res;
+    AttackParameters ap = estimate_attack_feasibility(m_base_neighbourhood,
+                                                      m_arival_time,
+                                                      max_number_of_attacking_bases);
 
 
+    
+
+
+
+
+    //cerr << "Returned ap:" << endl;
+    //cerr << ap << endl;
+    if (ap.m_destination_base_id != -1) {
+
+        //cerr << "Dispatching troops..." << endl;
+        int id = ap.m_destination_base_id;
+        for(int i = 0; i <= ap.m_boarder_base; i++) {
+            if ( m_base_neighbourhood[id][i]->m_owner != 0 )
+                continue;
+
+            int from = m_base_neighbourhood[id][i]->m_id;
+            int to = id;
+
+            //cerr << "from: " << from << " to: " << to << endl;
+
+            res.push_back(from);
+            res.push_back(to);
+        }
+
+    }
 
     m_step++;
     return res;
