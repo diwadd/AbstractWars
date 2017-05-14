@@ -23,6 +23,7 @@ public:
     int m_size;
     int m_gr; // growth rate
     bool m_under_attack;
+    bool m_attacking;
     int m_attack_time;
 };
 
@@ -44,12 +45,19 @@ ostream & operator<<(ostream & os, const Base &b){
 class AttackParameters {
 public:
     int m_destination_base_id;
+    int m_destination_base_gr;
     int m_boarder_base;
     int m_max_arival_time;
 
-    AttackParameters() { m_destination_base_id = -1; m_boarder_base = -1; m_max_arival_time = -1; }
-    AttackParameters(int dest, int bi, int mat): m_destination_base_id(dest), m_boarder_base(bi), m_max_arival_time(mat) {}
-    AttackParameters(const AttackParameters &ap): m_destination_base_id(ap.m_destination_base_id), 
+    AttackParameters() { m_destination_base_id = -1; m_destination_base_gr = -1; m_boarder_base = -1; m_max_arival_time = -1; }
+
+    AttackParameters(int dest, int gr, int bi, int mat): m_destination_base_id(dest), 
+                                                         m_destination_base_gr(gr),
+                                                         m_boarder_base(bi), 
+                                                         m_max_arival_time(mat) {}
+
+    AttackParameters(const AttackParameters &ap): m_destination_base_id(ap.m_destination_base_id),
+                                                  m_destination_base_gr(ap.m_destination_base_gr), 
                                                   m_boarder_base(ap.m_boarder_base), 
                                                   m_max_arival_time(ap.m_max_arival_time) { 
                                                     //cerr << "Calling AttackParameters copy constructor." << endl;
@@ -59,6 +67,7 @@ public:
 
 ostream & operator<<(ostream & os, const AttackParameters &ap){
     os << "AttackParameters - m_destination_base_id: " << ap.m_destination_base_id
+       << " m_destination_base_gr: " << ap.m_destination_base_gr
        << " boarder_base: " << ap.m_boarder_base
        << " max_arival_time: " << ap.m_max_arival_time;
 
@@ -69,7 +78,7 @@ ostream & operator<<(ostream & os, const AttackParameters &ap){
 class PriorityQueueAttackParametersCompare {
 	public:
 		inline bool operator ()(const AttackParameters &ap1, const AttackParameters &ap2) const {
-			return ap1.m_max_arival_time > ap2.m_max_arival_time;
+			return ap1.m_destination_base_gr < ap2.m_destination_base_gr;
 		}
 };
 
@@ -124,6 +133,7 @@ void update_bases(vector<int> &bases, vector<Base> &m_bases, int &m_step) {
             m_bases[i].m_size = bases[2*i + 1];
             m_bases[i].m_gr = gr;
             m_bases[i].m_under_attack = false;
+            m_bases[i].m_attacking = false;
             m_bases[i].m_attack_time = -1;
         }
 
@@ -179,6 +189,7 @@ AttackParameters estimate_attack_feasibility_for_base(vector<Base*> &base_neighb
 
     int N = base_neighbourhood.size();
     int id = base_neighbourhood[0]->m_id;
+    int gr = base_neighbourhood[0]->m_gr;
 
     int number_of_checked_ally_bases = 0;
     int gathered_troops = 0;
@@ -219,7 +230,7 @@ AttackParameters estimate_attack_feasibility_for_base(vector<Base*> &base_neighb
         }
     }
 
-    return AttackParameters(id, boarder_base, max_arival_time);
+    return AttackParameters(id, gr, boarder_base, max_arival_time);
 }
 
 
@@ -248,11 +259,10 @@ AttackParameters estimate_attack_feasibility(vector<vector<Base*>> &base_neighbo
 
     }
 
-    //  //cerr << "Priority queue content:" << endl;
+    //cerr << "Priority queue content:" << endl;
     //while (!pq.empty()) {
-    //    //cerr << pq.top() << endl;
+    //    cerr << pq.top() << endl;
     //    pq.pop();
-
     //}
 
     while(!pq.empty()) {
@@ -306,6 +316,7 @@ int AbstractWars::init(vector <int> base_locations, int speed) {
         m_bases[i].m_x = base_locations[2*i];
         m_bases[i].m_y = base_locations[2*i + 1];
         m_bases[i].m_under_attack = false;
+        m_bases[i].m_attacking = false;
         m_distance_matrix[i].resize(N);
         m_arival_time[i].resize(N);
         m_base_neighbourhood[i].resize(N);
@@ -390,7 +401,7 @@ vector<int> AbstractWars::sendTroops(vector <int> bases, vector <int> troops) {
     
     }
 
-    int max_number_of_attacking_bases = 5; //int(bases.size()/4);
+    int max_number_of_attacking_bases = int(bases.size()/4);
 
     AttackParameters ap = estimate_attack_feasibility(m_base_neighbourhood,
                                                       m_arival_time,
@@ -407,9 +418,12 @@ vector<int> AbstractWars::sendTroops(vector <int> bases, vector <int> troops) {
     //cerr << ap << endl;
     if (ap.m_destination_base_id != -1) {
 
-        //cerr << "Dispatching troops..." << endl;
+        cerr << "Dispatching troops..." << endl;
         int id = ap.m_destination_base_id;
         int at = ap.m_max_arival_time;
+        int gr = ap.m_destination_base_gr;
+        cerr << "gr: " << gr << endl;
+        
         for(int i = 0; i <= ap.m_boarder_base; i++) {
             if ( m_base_neighbourhood[id][i]->m_owner != 0 )
                 continue;
@@ -417,7 +431,7 @@ vector<int> AbstractWars::sendTroops(vector <int> bases, vector <int> troops) {
             int from_base = m_base_neighbourhood[id][i]->m_id;
             int to_base = id;
 
-            //cerr << "from: " << from << " to: " << to << endl;
+            cerr << "from: " << from_base << " to: " << to_base << endl;
 
             res.push_back(from_base);
             res.push_back(to_base);
