@@ -23,6 +23,7 @@ public:
     int m_size;
     int m_gr; // growth rate
     bool m_under_attack;
+    int m_attack_time;
 };
 
 
@@ -33,7 +34,8 @@ ostream & operator<<(ostream & os, const Base &b){
        << " owner: " << b.m_owner
        << " size: " << b.m_size
        << " gr: " << b.m_gr
-       << " ua: " << b.m_under_attack;
+       << " ua: " << b.m_under_attack
+       << " at: " << b.m_attack_time;
 
     return os;
 }
@@ -122,6 +124,7 @@ void update_bases(vector<int> &bases, vector<Base> &m_bases, int &m_step) {
             m_bases[i].m_size = bases[2*i + 1];
             m_bases[i].m_gr = gr;
             m_bases[i].m_under_attack = false;
+            m_bases[i].m_attack_time = -1;
         }
 
     // On the other iterations updata only the owners and sizes.
@@ -129,9 +132,14 @@ void update_bases(vector<int> &bases, vector<Base> &m_bases, int &m_step) {
     } else {
 
         for(int i = 0; i < N; i++) {
+
+            if ( (m_bases[i].m_under_attack == true) && (m_bases[i].m_attack_time == m_step) ) {
+                m_bases[i].m_under_attack = false;
+                m_bases[i].m_attack_time = -1;
+            }
+
             m_bases[i].m_owner = bases[2*i];
             m_bases[i].m_size = bases[2*i + 1];
-            m_bases[i].m_under_attack = false;
         }
     } // else end
 }
@@ -199,7 +207,7 @@ AttackParameters estimate_attack_feasibility_for_base(vector<Base*> &base_neighb
 
         number_of_checked_ally_bases++;
         // If there are enough troops attack.
-        if (future_base_size < gathered_troops) {
+        if (1.2*future_base_size < gathered_troops) {
 
             boarder_base = i;
             max_arival_time = troop_arival_time;
@@ -217,7 +225,8 @@ AttackParameters estimate_attack_feasibility_for_base(vector<Base*> &base_neighb
 
 AttackParameters estimate_attack_feasibility(vector<vector<Base*>> &base_neighbourhood,
                                              vector<vector<int>> &m_arival_time,
-                                             int &max_number_of_attacking_bases) {
+                                             int &max_number_of_attacking_bases,
+                                             vector<Base> &bases) {
 
     int N = base_neighbourhood.size();
 
@@ -246,11 +255,20 @@ AttackParameters estimate_attack_feasibility(vector<vector<Base*>> &base_neighbo
 
     //}
 
-    if (!pq.empty()) {
-        //cerr << "Returning pq top" << endl;
-        return AttackParameters(pq.top());
-    } else
-        return AttackParameters();
+    while(!pq.empty()) {
+
+        int destination_base_id = pq.top().m_destination_base_id;
+
+        if (bases[destination_base_id].m_under_attack == true) {
+            pq.pop();
+            continue;
+        }
+        
+        if (bases[destination_base_id].m_under_attack == false)
+            return AttackParameters(pq.top());
+    }
+
+    return AttackParameters();
 }
 
 
@@ -342,9 +360,9 @@ int AbstractWars::init(vector <int> base_locations, int speed) {
 
 vector<int> AbstractWars::sendTroops(vector <int> bases, vector <int> troops) {
 
-    //cerr << "Step: " << m_step << endl;
+    //cerr << endl << "Step: " << m_step << endl;
     update_bases(bases, m_bases, m_step);
-    //print_vector(m_bases);
+    print_vector(m_bases);
 
     vector<int> res;
     if (m_step < 1) {
@@ -372,11 +390,12 @@ vector<int> AbstractWars::sendTroops(vector <int> bases, vector <int> troops) {
     
     }
 
-    int max_number_of_attacking_bases = 5;
+    int max_number_of_attacking_bases = 5; //int(bases.size()/4);
 
     AttackParameters ap = estimate_attack_feasibility(m_base_neighbourhood,
                                                       m_arival_time,
-                                                      max_number_of_attacking_bases);
+                                                      max_number_of_attacking_bases,
+                                                      m_bases);
 
 
     
@@ -390,17 +409,22 @@ vector<int> AbstractWars::sendTroops(vector <int> bases, vector <int> troops) {
 
         //cerr << "Dispatching troops..." << endl;
         int id = ap.m_destination_base_id;
+        int at = ap.m_max_arival_time;
         for(int i = 0; i <= ap.m_boarder_base; i++) {
             if ( m_base_neighbourhood[id][i]->m_owner != 0 )
                 continue;
 
-            int from = m_base_neighbourhood[id][i]->m_id;
-            int to = id;
+            int from_base = m_base_neighbourhood[id][i]->m_id;
+            int to_base = id;
 
             //cerr << "from: " << from << " to: " << to << endl;
 
-            res.push_back(from);
-            res.push_back(to);
+            res.push_back(from_base);
+            res.push_back(to_base);
+
+            m_bases[to_base].m_under_attack = true;
+            m_bases[to_base].m_attack_time = m_step + at;
+
         }
 
     }
