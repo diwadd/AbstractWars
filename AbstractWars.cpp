@@ -7,14 +7,15 @@
 #include <limits>
 #include <queue>
 #include <random>
-
+#include <set>
 
 using namespace std;
 
 const int LOCAL_MAX_INT = numeric_limits<int>::max();
-const int MAX_NUMBER_OF_COORDINATED_ATTACKS_PER_STEP_PER_GROWTH_TYPE = 5;
+const int MAX_NUMBER_OF_COORDINATED_ATTACKS_PER_STEP_PER_GROWTH_TYPE = 1;
 const int MAX_NUMBER_OF_ATTACKING_BASES_IN_COORDINATED_ATTACK = 4;
-const int MGR = 3;
+const int MGR = 3; // max growth rate
+
 
 class Base {
 public:
@@ -62,7 +63,6 @@ public:
                                                   m_destination_base_gr(ap.m_destination_base_gr), 
                                                   m_boarder_base(ap.m_boarder_base), 
                                                   m_max_arival_time(ap.m_max_arival_time) { 
-                                                    //cerr << "Calling AttackParameters copy constructor." << endl;
                                                   }
 };
 
@@ -117,7 +117,6 @@ void print_matrix(vector<vector<double>> &dm) {
             fprintf(stderr, "%4.2f ", dm[i][j]);
         fprintf(stderr, "\n");
     }
-
 }
 
 
@@ -138,6 +137,7 @@ int estimate_size_in_t_steps(Base &b, int &t_steps) {
 
 }
 
+
 int troop_arrival_time(int &origin_base_id,
                       int &destination_base_id,
                       vector<vector<double>> m_destination_matrix,
@@ -146,9 +146,6 @@ int troop_arrival_time(int &origin_base_id,
     double d = m_destination_matrix[origin_base_id][destination_base_id];
     return ceil(d/speed);
 }
-
-
-
 
 
 class BasicAttackParameters {
@@ -171,7 +168,6 @@ public:
                                                              m_destination_base_id(eap.m_destination_base_id),
                                                              m_arival_time(eap.m_arival_time) { }
 };
-
 
 
 class ExtendedAttackParameters {
@@ -222,10 +218,17 @@ class PriorityQueueExtendedAttackParametersCompare {
 
 class AbstractWars {
 public:
+
+    int B;
+    vector<int> baseX, baseY;
+    vector<int> others;
+    int getRandomBase(int sourceInd);
+
     default_random_engine m_engine;
     static int m_step;
     int m_speed;
     int m_no_of_attacking_bases;
+    vector<double> m_powers;
     vector<Base> m_bases;
     vector<vector<double>> m_distance_matrix;
     vector<vector<int>> m_arival_time;
@@ -249,11 +252,33 @@ public:
                                                priority_queue<ExtendedAttackParameters, vector<ExtendedAttackParameters>, PriorityQueueExtendedAttackParametersCompare> &pq);    
     int get_random_base(int origin);
     void nearest_neighbour_attack(vector<int> &res);
+    void attack_random_base(vector<int> &res);
     void refill_zero_base(vector<int> &res);
-    void update_bases(vector<int> &bases);
+    void support_bases(vector<int> &res);
+    void update_bases(vector<int> &bases, vector<int> &troops);
     int init(vector <int> base_locations, int speed);
     vector <int> sendTroops(vector <int> bases, vector <int> troops);
 };
+
+
+int AbstractWars::getRandomBase(int sourceInd) {
+    vector<double> probs(others.size());
+    double sp = 0;
+    for (int i = 0; i < (int)others.size(); ++i) {
+        int ind = others[i];
+        probs[i] = 1 / (pow(baseX[sourceInd] - baseX[ind], 2) + pow(baseY[sourceInd] - baseY[ind], 2));
+        sp += probs[i];
+    }
+    
+    double r = rand() * 1.0/RAND_MAX * sp;
+    double s = 0;
+    for (int i = 0; i < (int)others.size(); ++i) {
+        s += probs[i];
+        if (s >= r)
+            return others[i];
+    }
+    return others[others.size() - 1];
+}
 
 
 bool AbstractWars::are_there_any_bases_left(int growth_rate) {
@@ -288,35 +313,31 @@ ExtendedAttackParameters AbstractWars::single_coordinated_attack(vector<Base*> &
     //std::exponential_distribution<> d(mean);    
     //uniform_int_distribution<> d(log(mean), mean);
 
-    int attack_range = 0;
-    if (m_controlled_bases == 0)
-        attack_range = 100;
-    else {
-        normal_distribution<> d((N/m_controlled_bases)*m_controlled_bases*log(m_controlled_bases), sqrt(m_controlled_bases));    
-        attack_range = int(d(m_engine));
-        if (attack_range < 0)
-            attack_range = 100;
-    }
+    double mean_enemy_distance = 0.0;
+    for(int i = 0; i < N; i++) {
+        if (base_neighbourhood[i]->m_owner == 0)
+            continue;
 
-    //cerr << "single m_controlled_bases: " << m_controlled_bases << endl;
-    //cerr << "attack_range: " << attack_range << " mean: " << mean << " std: " << std << endl;
+        int attacking_base_id = base_neighbourhood[i]->m_id;
+        mean_enemy_distance += m_distance_matrix[id][attacking_base_id];
+    }
+    mean_enemy_distance = mean_enemy_distance/(N-1);
+
     for(int i = 1; i < N; i++) {
 
-        //cerr << "i: " << i << endl;
+        int attacking_base_id = base_neighbourhood[i]->m_id;
+
         if (base_neighbourhood[i]->m_owner != 0)
             continue;
 
-        if (m_bases[i].m_attacking == true)
+
+        if (base_neighbourhood[i]->m_attacking == true)
             continue;
 
-        //if (m_controlled_bases > N/2)
-        //    if (m_bases[i].m_size < 400)
-        //        continue;
-        //if(checked_bases > MAX_NUMBER_OF_ATTACKING_BASES_IN_COORDINATED_ATTACK)
-        //    break;
+        if(checked_bases > MAX_NUMBER_OF_ATTACKING_BASES_IN_COORDINATED_ATTACK)
+            break;
 
-        int attacking_base_id = base_neighbourhood[i]->m_id;
-        if(m_distance_matrix[id][attacking_base_id] > 100)
+        if(m_distance_matrix[id][attacking_base_id] > 300)
             break;
 
         checked_bases++;
@@ -331,8 +352,6 @@ ExtendedAttackParameters AbstractWars::single_coordinated_attack(vector<Base*> &
 
         // What will be the size of the enemies base at troop arival time?
         int future_base_size = estimate_size_in_t_steps(*base_neighbourhood[0], troop_arrival_time);
-
-        //cerr << "troop_arrival_time: " << troop_arrival_time << " gathered_troops: " << gathered_troops << " future_base_size: " << future_base_size << " growth rate: " << base_neighbourhood[0]->m_gr << endl;
 
         // If there are enough troops attack.
         if (1.2*future_base_size < gathered_troops) {
@@ -356,8 +375,6 @@ ExtendedAttackParameters AbstractWars::single_coordinated_attack(vector<Base*> &
         for(int i = 0; i < N; i++) {
             if (attacking_bases_marker[i] == true) {
                 eap.m_bases_taking_part_in_the_attack[i] = true;
-                m_bases[i].m_attacking = true;
-                m_no_of_attacking_bases++;
             }
         }
 
@@ -372,34 +389,27 @@ void AbstractWars::prepare_multiple_coordinated_attack(vector<vector<Base*>> &ba
                                                        priority_queue<ExtendedAttackParameters, vector<ExtendedAttackParameters>, PriorityQueueExtendedAttackParametersCompare> &pq) {
 
     int N = base_neighbourhood.size();
-
     for(int i = 0; i < N; i++) {
 
         if (m_no_of_attacking_bases == m_bases.size())
             break;
-
+     
         if (base_neighbourhood[i][0]->m_owner == 0)
             continue;
 
         if (base_neighbourhood[i][0]->m_under_attack == true)
             continue;
 
-        //cerr << "Enemy cell!" << endl;
         ExtendedAttackParameters eap = single_coordinated_attack(base_neighbourhood[i]);
-        //print_eap(eap);
-
         if (eap.m_destination_base_id != -1)
             pq.push(eap);
 
     }
-
 }
 
 
 bool AbstractWars::dispatch_multiple_coordinated_attacks(vector<int> &res,
                                                          priority_queue<ExtendedAttackParameters, vector<ExtendedAttackParameters>, PriorityQueueExtendedAttackParametersCompare> &pq) {
-
-    //cerr << "dispatch_multiple_coordinated_attacks" << endl;
 
     int number_of_coordinated_attacks_per_step_pre_grwoth_type = 0;
     bool return_value = false;
@@ -415,7 +425,6 @@ bool AbstractWars::dispatch_multiple_coordinated_attacks(vector<int> &res,
             break;
 
         ExtendedAttackParameters eap = pq.top();
-        //print_eap(eap);
 
         int destination_id = eap.m_destination_base_id;
         m_bases[destination_id].m_under_attack = true;
@@ -426,6 +435,8 @@ bool AbstractWars::dispatch_multiple_coordinated_attacks(vector<int> &res,
                 continue;
 
             int origin_id = m_bases[i].m_id;
+            m_bases[origin_id].m_attacking = true;
+            m_no_of_attacking_bases++;
 
             res.push_back(origin_id);
             res.push_back(destination_id);
@@ -434,7 +445,6 @@ bool AbstractWars::dispatch_multiple_coordinated_attacks(vector<int> &res,
         pq.pop();
         number_of_coordinated_attacks_per_step_pre_grwoth_type++;
     }
-
     return return_value;
 }
 
@@ -445,7 +455,6 @@ bool AbstractWars::dispatch_multiple_coordinated_attacks(vector<int> &res,
 void AbstractWars::nearest_neighbour_attack(vector<int> &res) {
 
     int N = m_bases.size();
-    //cerr << "nearest_neighbour_attack ->" << endl;
     for(int i = 0; i < N; i++) {
         
         if (m_base_neighbourhood[i][0]->m_attacking == true)
@@ -484,17 +493,9 @@ void AbstractWars::nearest_neighbour_attack(vector<int> &res) {
             // What will be the size of the enemies base at troop arival time?
             int future_base_size = estimate_size_in_t_steps(*m_base_neighbourhood[i][j], troop_arrival_time);
 
-
-            //cerr << "troop_arrival_time: " << troop_arrival_time << " gathered_troops: " << gathered_troops << " future_base_size: " << future_base_size << endl;
-            // If there are enough troops attack.
             if (1.2*future_base_size < gathered_troops) {
-
-                //cerr << "-> troop_arrival_time: " << troop_arrival_time << " gathered_troops: " << gathered_troops << " future_base_size: " << future_base_size << endl;
-
                 res.push_back(origin_id);
                 res.push_back(attacked_base_id);
-
-                //cerr << "nearest_neighbour_attack" << endl;
 
                 m_bases[origin_id].m_attacking = true;
                 m_bases[attacked_base_id].m_under_attack = true;
@@ -512,10 +513,55 @@ void AbstractWars::nearest_neighbour_attack(vector<int> &res) {
 }
 
 
+void AbstractWars::attack_random_base(vector<int> &res) {
+
+    int N = m_bases.size();
+    vector<double> p(N, 0.0);
+
+    bool break_flag = false;
+
+    for(int i = 0; i < N; i++) {
+
+        if (m_bases[i].m_attacking == true)
+            continue;
+
+        if (m_bases[i].m_owner != 0)
+            continue;
+   
+        if (m_bases[i].m_size < 900)
+            continue;
+
+        double cp = 0.0;
+        for(int j = 0; j < N; j++) {
+
+            if (i == j)
+                continue;
+
+            if (m_bases[j].m_owner == 0)
+                continue;
+
+            double base_p = 1.0/m_distance_matrix[i][j];
+            p[j] = cp + base_p;
+            cp = cp + base_p;
+        }
+
+        uniform_real_distribution<> rd(0.0, 1.0);
+        double ap = rd(m_engine)*cp;
+        for(int j = 0; j < N; j++) {
+            if (p[j] > ap) {
+                //cerr << "Random attack!" << endl;
+                m_bases[i].m_attacking = true;
+                res.push_back(i);
+                res.push_back(j);
+                break;
+            }
+        }
+    }
+}
+
 
 void AbstractWars::refill_zero_base(vector<int> &res) {
 
-    //cerr << "Zero base search" << endl;
     int N = m_bases.size();
     for(int i = 0; i < N; i++) {
 
@@ -525,7 +571,6 @@ void AbstractWars::refill_zero_base(vector<int> &res) {
         if (m_bases[i].m_under_attack == true)
             continue;
 
-        //cerr << "Empty base!!!" << endl;
         for(int j = 1; j < N; j++) {
 
             if (m_base_neighbourhood[i][j]->m_owner != 0)
@@ -547,25 +592,75 @@ void AbstractWars::refill_zero_base(vector<int> &res) {
 
         }
     }
+}
 
+
+void AbstractWars::support_bases(vector<int> &res) {
+
+    int N = m_base_neighbourhood.size();
+
+    for(int i = 0; i < N; i++) {
+        
+        if (m_base_neighbourhood[i][0]->m_owner != 0)
+            continue;
+
+        if (m_base_neighbourhood[i][0]->m_attacking == true)
+            continue;
+
+        if (m_base_neighbourhood[i][0]->m_size < 900)
+            continue;
+
+        for(int j = 1; j < N; j++) {
+
+            if (m_base_neighbourhood[i][j]->m_attacking == true)
+                continue;
+
+            if (m_base_neighbourhood[i][j]->m_owner != 0)
+                continue;
+            else {
+
+                res.push_back(i);
+                res.push_back(m_base_neighbourhood[i][j]->m_id);
+                break;
+            }
+        }
+    }
 }
 
 
 
-
-void AbstractWars::update_bases(vector<int> &bases) {
+void AbstractWars::update_bases(vector<int> &bases, vector<int> &troops) {
 
     int N = bases.size()/2;
+
     m_no_of_attacking_bases = 0;
     m_controlled_bases = 0;
 
     // Calculate the growth rate on the first iteration.
-    if (m_step == 1) {
+    if (m_step == 0) {
 
+        for(int i = 0; i < N; i++) {
+
+            m_bases[i].m_owner = bases[2*i];
+
+            if(bases[2*i] == 0)
+                m_controlled_bases++;
+
+            m_bases[i].m_size = bases[2*i + 1];
+            m_bases[i].m_under_attack = false;
+            m_bases[i].m_attacking = false;
+            m_bases[i].m_attack_time = -1;
+        }
+
+   
+    } else if (m_step == 1) {
+
+        set<int> player_set;
         for(int i = 0; i < N; i++) {
 
             int gr = bases[2*i + 1] - m_bases[i].m_size;
             m_bases[i].m_owner = bases[2*i];
+            player_set.insert(bases[2*i]);
 
             if(bases[2*i] == 0)
                 m_controlled_bases++;
@@ -577,17 +672,17 @@ void AbstractWars::update_bases(vector<int> &bases) {
             m_bases[i].m_attack_time = -1;
         }
 
+        m_powers.resize(player_set.size(), 0);
 
         int index1 = 0;
         int index2 = 0;
         int index3 = 0;
 
-        vector<int> index_vec(MGR, 0);
+        vector<int> index_vec(MGR + 1, 0);
         for(int i = 0; i <= MGR; i++)
             m_base_neighbourhood_123.push_back(vector<vector<Base*>>());
 
         for(int i = 0; i < N; i++) {
-
 
             for(int k = 1; k <= MGR; k++)            
                 if (m_bases[i].m_gr == k)
@@ -648,13 +743,14 @@ void AbstractWars::update_bases(vector<int> &bases) {
                 index3++;
             }
             sort(m_base_neighbourhood[i].begin(), m_base_neighbourhood[i].end(), cf);
-
-
         }
 
-    // On the other iterations updata only the owners and sizes.
+    // On other iterations updata only the owners and sizes.
     // Growth rate is constant.
     } else {
+
+        for(int i = 0; i < m_powers.size(); i++)
+            m_powers[i] = 0;
 
         for(int i = 0; i < N; i++) {
 
@@ -669,20 +765,39 @@ void AbstractWars::update_bases(vector<int> &bases) {
             m_bases[i].m_attacking = false;
             m_bases[i].m_owner = bases[2*i];
             m_bases[i].m_size = bases[2*i + 1];
+            m_powers[ bases[2*i] ] = m_powers[ bases[2*i] ] + bases[2*i + 1];
+
         }
+
+
+        int M = troops.size()/4;
+        for(int i = 0; i < M; i++)
+            m_powers[ troops[4*i] ] = m_powers[ troops[4*i] ] + troops[4*i + 1];
+
+        int tt = 0;
+        for(int i = 0; i < m_powers.size(); i++)
+            tt = tt + m_powers[i];
+
+        for(int i = 0; i < m_powers.size(); i++)
+            m_powers[i] = m_powers[i]/tt;
+
     } // else end
 }
 
 
-
 int AbstractWars::init(vector <int> base_locations, int speed) {
+
+    srand(123);
+    B = base_locations.size() / 2;
+    for (int i = 0; i < B; ++i) {
+        baseX.push_back(base_locations[2*i]);
+        baseY.push_back(base_locations[2*i+1]);
+    }
 
     random_device rd;
     m_engine.seed(rd());
 
     int N = base_locations.size()/2;
-
-    //cerr << "Number of base locations: " << N << endl;
 
     m_bases.resize(N);
     m_distance_matrix.resize(N);
@@ -723,20 +838,13 @@ int AbstractWars::init(vector <int> base_locations, int speed) {
 
     }
 
-    //cerr << "Print bases: " << endl;
-    //print_vector(m_bases);
-
-    //cerr << "Print distance matrix:" << endl;
-    //print_matrix(m_distance_matrix);
-
     return 0;
 }
 
 
 vector<int> AbstractWars::sendTroops(vector <int> bases, vector <int> troops) {
 
-    //cerr << endl << "Step: " << m_step << endl;
-    update_bases(bases);
+    update_bases(bases, troops);
     //print_vector(m_bases);
 
     vector<int> res;
@@ -745,129 +853,46 @@ vector<int> AbstractWars::sendTroops(vector <int> bases, vector <int> troops) {
         return res;
     }
 
-    /*
-    cerr << "m_base_neighbourhood_3 size: " << m_base_neighbourhood_3.size() << endl;
-    int index = 1;
-    int id0 = m_base_neighbourhood_3[index][0]->m_id;
-    for(int j = 0; j < m_bases.size(); j++) {
 
-        int id1 = m_base_neighbourhood_3[index][j]->m_id;
-        cerr << *m_base_neighbourhood_3[index][j] << " d: " << m_distance_matrix[id0][id1] << endl;
-    
-    }
+    //priority_queue<ExtendedAttackParameters, vector<ExtendedAttackParameters>, PriorityQueueExtendedAttackParametersCompare> pq1;
+    //prepare_multiple_coordinated_attack(m_base_neighbourhood_123[3], pq1);
+    //attack3 = dispatch_multiple_coordinated_attacks(res, pq1);
 
-    cerr << "m_base_neighbourhood_2 size: " << m_base_neighbourhood_2.size() << endl;
-    id0 = m_base_neighbourhood_2[index][0]->m_id;
-    for(int j = 0; j < m_bases.size(); j++) {
+    //priority_queue<ExtendedAttackParameters, vector<ExtendedAttackParameters>, PriorityQueueExtendedAttackParametersCompare> pq2;
+    //prepare_multiple_coordinated_attack(m_base_neighbourhood_123[2], pq2);
+    //attack2 = dispatch_multiple_coordinated_attacks(res, pq2);
 
-        int id1 = m_base_neighbourhood_2[index][j]->m_id;
-        cerr << *m_base_neighbourhood_2[index][j] << " d: " << m_distance_matrix[id0][id1] << endl;
-    
-    }
+    //priority_queue<ExtendedAttackParameters, vector<ExtendedAttackParameters>, PriorityQueueExtendedAttackParametersCompare> pq2;
+    //prepare_multiple_coordinated_attack(m_base_neighbourhood_123[1], pq2);
+    //dispatch_multiple_coordinated_attacks(res, pq2);
 
-    cerr << "m_base_neighbourhood_1 size: " << m_base_neighbourhood_1.size() << endl;
-    id0 = m_base_neighbourhood_1[index][0]->m_id;
-    for(int j = 0; j < m_bases.size(); j++) {
-
-        int id1 = m_base_neighbourhood_1[index][j]->m_id;
-        cerr << *m_base_neighbourhood_1[index][j] << " d: " << m_distance_matrix[id0][id1] << endl;
-    
-    }
-    */
-
-
-    //ExtendedAttackParameters eap = single_coordinated_attack(m_base_neighbourhood_3[1]);
-
-
-    priority_queue<ExtendedAttackParameters, vector<ExtendedAttackParameters>, PriorityQueueExtendedAttackParametersCompare> pq3;
-    prepare_multiple_coordinated_attack(m_base_neighbourhood_123[3], pq3);
-    dispatch_multiple_coordinated_attacks(res, pq3);
-
-
-    priority_queue<ExtendedAttackParameters, vector<ExtendedAttackParameters>, PriorityQueueExtendedAttackParametersCompare> pq2;
-    prepare_multiple_coordinated_attack(m_base_neighbourhood_123[2], pq2);
-    dispatch_multiple_coordinated_attacks(res, pq2);
-
-    //int gr = 3;
-    //if (are_there_any_bases_left(gr) == false) {
-    priority_queue<ExtendedAttackParameters, vector<ExtendedAttackParameters>, PriorityQueueExtendedAttackParametersCompare> pq1;
-    prepare_multiple_coordinated_attack(m_base_neighbourhood_123[1], pq1);
-    dispatch_multiple_coordinated_attacks(res, pq1);
-    //}
-
-    //while(!pq.empty()) {
-    //    print_eap(pq.top());
-    //    pq.pop();
-    //}
-
-
-    nearest_neighbour_attack(res);
-    refill_zero_base(res);
-
-    /*
-    int t_steps = 10;
-    int index = 3;
-    int fs = estimate_size_in_t_steps(m_bases[index], t_steps);
-
-    //cerr << "current: " << m_bases[index].m_size << " fs: " << fs << endl;
-
-    int orig = 0;
-    int dest = 10;
-
-    //cerr << "troop arival time: " << troop_arrival_time(orig, dest, m_distance_matrix, m_speed) << endl;
-    //cerr << m_arival_time[orig][dest] << endl;
-        
-    index = 4;
-    for(int j = 0; j < m_bases.size(); j++) {
-
-        int id1 = m_base_neighbourhood[index][j]->m_id;
-        //cerr << *m_base_neighbourhood[index][j] << " d: " << m_distance_matrix[index][id1] << endl;
-    
-    }
-
-    int max_number_of_attacking_bases = int(bases.size()/4);
-
-    AttackParameters ap = estimate_attack_feasibility(m_base_neighbourhood,
-                                                      m_arival_time,
-                                                      max_number_of_attacking_bases,
-                                                      m_bases);
-
-
-    
-
-
-
-
-    //cerr << "Returned ap:" << endl;
-    //cerr << ap << endl;
-    if (ap.m_destination_base_id != -1) {
-
-        cerr << "Dispatching troops..." << endl;
-        int id = ap.m_destination_base_id;
-        int at = ap.m_max_arival_time;
-        int gr = ap.m_destination_base_gr;
-        cerr << "gr: " << gr << endl;
-        
-        for(int i = 0; i <= ap.m_boarder_base; i++) {
-            if ( m_base_neighbourhood[id][i]->m_owner != 0 )
-                continue;
-
-            int from_base = m_base_neighbourhood[id][i]->m_id;
-            int to_base = id;
-
-            cerr << "from: " << from_base << " to: " << to_base << endl;
-
-            res.push_back(from_base);
-            res.push_back(to_base);
-
-            m_bases[to_base].m_under_attack = true;
-            m_bases[to_base].m_attack_time = m_step + at;
-
+    if (m_speed < 7) {
+        others.resize(0);
+        for (int i = 0; i < B; ++i)
+            if (bases[2*i] != 0)
+                others.push_back(i);
+        if (others.size() == 0) {
+            // noone to fight!
+            return vector<int>(0);
         }
 
+        for (int i = 0; i < B; ++i) {
+            //if (bases[2*i] == 0 && bases[2*i+1] > 1000 * 2 / 3) {
+            if (bases[2*i] == 0 && bases[2*i+1] > 975) {
+                // send troops to a random base of different ownership
+                res.push_back(i);
+                res.push_back(getRandomBase(i));
+            }
+        }
+    } else {
+
+        priority_queue<ExtendedAttackParameters, vector<ExtendedAttackParameters>, PriorityQueueExtendedAttackParametersCompare> pq1;
+        prepare_multiple_coordinated_attack(m_base_neighbourhood, pq1);
+        dispatch_multiple_coordinated_attacks(res, pq1);
+
     }
 
-    */
+    //refill_zero_base(res);
 
     m_step++;
     return res;
